@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bumper Car Game</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Luckiest+Guy&family=IBM+Plex+Sans:wght@400;600&display=swap');
+
+    :root {
+      --bg: #0f1a24;
+      --panel: #192635;
+      --accent: #ff5c79;
+      --accent-2: #ffd166;
+      --text: #f8f3ea;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(circle at 15% 20%, rgba(255, 92, 121, 0.2), transparent 45%),
+        radial-gradient(circle at 85% 15%, rgba(255, 209, 102, 0.2), transparent 40%),
+        linear-gradient(180deg, #0f1a24 0%, #0c141c 100%);
+      color: var(--text);
+      font-family: 'IBM Plex Sans', sans-serif;
+      padding: 24px;
+    }
+
+    .frame {
+      width: min(960px, 96vw);
+      background: rgba(25, 38, 53, 0.92);
+      border-radius: 22px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 18px 18px 24px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+    }
+
+    .hud {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .hud h1 {
+      margin: 0;
+      font-family: 'Luckiest Guy', cursive;
+      font-size: clamp(1.8rem, 3vw, 2.6rem);
+      letter-spacing: 0.06em;
+    }
+
+    .hud p {
+      margin: 0;
+      font-size: 0.95rem;
+      color: rgba(248, 243, 234, 0.75);
+    }
+
+    .counter {
+      font-family: 'Luckiest Guy', cursive;
+      font-size: 1.2rem;
+      letter-spacing: 0.06em;
+      color: var(--accent-2);
+    }
+
+    .arena {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      border-radius: 18px;
+      background:
+        linear-gradient(120deg, rgba(255, 255, 255, 0.04), transparent 60%),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+        linear-gradient(0deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+        #101b27;
+      background-size: auto, 40px 40px, 40px 40px, auto;
+      overflow: hidden;
+      border: 2px solid rgba(255, 255, 255, 0.08);
+    }
+
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .hint {
+      margin-top: 12px;
+      font-size: 0.9rem;
+      color: rgba(248, 243, 234, 0.6);
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <div class="hud">
+      <h1>BUMPO CARS</h1>
+      <p>WASD / Arrow Keys to drive. Bump the walls and roaming bumpers.</p>
+      <div class="counter">Bumps: <span id="bump-count">0</span></div>
+    </div>
+    <div class="arena">
+      <canvas id="game" width="1280" height="720"></canvas>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+
+    const bumpCount = document.getElementById('bump-count');
+
+    const images = {
+      car: Object.assign(new Image(), { src: 'ben.png' }),
+      obstacles: [
+        { name: 'ang', img: Object.assign(new Image(), { src: 'ang.png' }) },
+        { name: 'bob', img: Object.assign(new Image(), { src: 'bob.png' }) },
+        { name: 'brian', img: Object.assign(new Image(), { src: 'brian.png' }) },
+        { name: 'pip', img: Object.assign(new Image(), { src: 'pip.png' }) },
+        { name: 'harlan', img: Object.assign(new Image(), { src: 'harlan.png' }) },
+        { name: 'percy', img: Object.assign(new Image(), { src: 'percy.png' }) },
+      ],
+    };
+
+    const state = {
+      width: canvas.width,
+      height: canvas.height,
+      keys: new Set(),
+      bumps: [],
+      obstacles: [],
+      bumpTotal: 0,
+      lastBumpTime: 0,
+      car: {
+        x: 200,
+        y: 360,
+        vx: 0,
+        vy: 0,
+        radius: 32,
+        color: '#ff5c79',
+      },
+    };
+
+    const maxSpeed = 5.2;
+    const accel = 0.35;
+    const friction = 0.88;
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function addBump(x, y) {
+      const now = performance.now();
+      if (now - state.lastBumpTime < 220) {
+        return;
+      }
+      state.lastBumpTime = now;
+      state.bumpTotal += 1;
+      bumpCount.textContent = String(state.bumpTotal);
+      state.bumps.push({
+        x,
+        y,
+        life: 0,
+        rotation: 0,
+      });
+    }
+
+    function updateCar() {
+      const car = state.car;
+      let ax = 0;
+      let ay = 0;
+
+      if (state.keys.has('ArrowUp') || state.keys.has('w')) ay -= accel;
+      if (state.keys.has('ArrowDown') || state.keys.has('s')) ay += accel;
+      if (state.keys.has('ArrowLeft') || state.keys.has('a')) ax -= accel;
+      if (state.keys.has('ArrowRight') || state.keys.has('d')) ax += accel;
+
+      car.vx = clamp(car.vx + ax, -maxSpeed, maxSpeed);
+      car.vy = clamp(car.vy + ay, -maxSpeed, maxSpeed);
+
+      car.vx *= friction;
+      car.vy *= friction;
+
+      car.x += car.vx;
+      car.y += car.vy;
+
+      const r = car.radius;
+      let bumped = false;
+
+      if (car.x - r < 0) {
+        car.x = r;
+        car.vx = Math.abs(car.vx) * 0.8;
+        bumped = true;
+      }
+      if (car.x + r > state.width) {
+        car.x = state.width - r;
+        car.vx = -Math.abs(car.vx) * 0.8;
+        bumped = true;
+      }
+      if (car.y - r < 0) {
+        car.y = r;
+        car.vy = Math.abs(car.vy) * 0.8;
+        bumped = true;
+      }
+      if (car.y + r > state.height) {
+        car.y = state.height - r;
+        car.vy = -Math.abs(car.vy) * 0.8;
+        bumped = true;
+      }
+
+      state.obstacles.forEach((obs) => {
+        const dx = car.x - obs.x;
+        const dy = car.y - obs.y;
+        const dist = Math.hypot(dx, dy);
+        const minDist = car.radius + obs.r;
+        if (dist < minDist) {
+          const angle = Math.atan2(dy, dx);
+          car.x = obs.x + Math.cos(angle) * minDist;
+          car.y = obs.y + Math.sin(angle) * minDist;
+          car.vx *= -0.7;
+          car.vy *= -0.7;
+          obs.vx *= -0.7;
+          obs.vy *= -0.7;
+          bumped = true;
+        }
+      });
+
+      if (bumped) {
+        addBump(car.x, car.y - 60);
+      }
+    }
+
+    function updateBumps() {
+      state.bumps = state.bumps.filter((bump) => bump.life < 1);
+      state.bumps.forEach((bump) => {
+        bump.life += 0.02;
+        bump.rotation += 0.18;
+        bump.y -= 0.6;
+      });
+    }
+
+    function updateObstacles() {
+      state.obstacles.forEach((obs) => {
+        obs.x += obs.vx;
+        obs.y += obs.vy;
+
+        if (obs.x - obs.r < 0 || obs.x + obs.r > state.width) {
+          obs.vx *= -1;
+          obs.x = clamp(obs.x, obs.r, state.width - obs.r);
+        }
+        if (obs.y - obs.r < 0 || obs.y + obs.r > state.height) {
+          obs.vy *= -1;
+          obs.y = clamp(obs.y, obs.r, state.height - obs.r);
+        }
+      });
+    }
+
+    function drawStar(x, y, radius, points, inset, rotation) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rotation);
+      ctx.beginPath();
+      for (let i = 0; i < points * 2; i += 1) {
+        const angle = (Math.PI * i) / points;
+        const r = i % 2 === 0 ? radius : radius * inset;
+        ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawArena() {
+      ctx.clearRect(0, 0, state.width, state.height);
+
+      state.obstacles.forEach((obs) => {
+        const size = obs.r * 2;
+        if (obs.img.complete) {
+          ctx.drawImage(obs.img, obs.x - obs.r, obs.y - obs.r, size, size);
+        } else {
+          ctx.fillStyle = '#ffd166';
+          ctx.beginPath();
+          ctx.arc(obs.x, obs.y, obs.r, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      });
+
+      const car = state.car;
+      const carSize = car.radius * 2;
+      if (images.car.complete) {
+        ctx.drawImage(images.car, car.x - car.radius, car.y - car.radius, carSize, carSize);
+      } else {
+        ctx.fillStyle = car.color;
+        ctx.beginPath();
+        ctx.arc(car.x, car.y, car.radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      state.bumps.forEach((bump) => {
+        const alpha = 1 - bump.life;
+        ctx.fillStyle = `rgba(255, 92, 121, ${alpha})`;
+        ctx.strokeStyle = `rgba(255, 209, 102, ${alpha})`;
+        ctx.lineWidth = 4;
+        drawStar(bump.x, bump.y, 50, 6, 0.45, bump.rotation);
+
+        ctx.fillStyle = `rgba(15, 10, 8, ${alpha})`;
+        ctx.font = '22px "Luckiest Guy"';
+        ctx.textAlign = 'center';
+        ctx.fillText('BUMPO!', bump.x, bump.y + 8);
+      });
+    }
+
+    function tick() {
+      updateCar();
+      updateObstacles();
+      updateBumps();
+      drawArena();
+      requestAnimationFrame(tick);
+    }
+
+    function initObstacles() {
+      const positions = [
+        { x: 300, y: 180 },
+        { x: 520, y: 140 },
+        { x: 900, y: 260 },
+        { x: 360, y: 520 },
+        { x: 720, y: 500 },
+        { x: 980, y: 440 },
+      ];
+
+      state.obstacles = images.obstacles.map((entry, index) => {
+        const base = positions[index % positions.length];
+        return {
+          x: base.x,
+          y: base.y,
+          r: 36,
+          vx: (Math.random() * 2 + 0.6) * (Math.random() < 0.5 ? -1 : 1),
+          vy: (Math.random() * 2 + 0.6) * (Math.random() < 0.5 ? -1 : 1),
+          img: entry.img,
+        };
+      });
+    }
+
+    window.addEventListener('keydown', (event) => {
+      state.keys.add(event.key);
+    });
+
+    window.addEventListener('keyup', (event) => {
+      state.keys.delete(event.key);
+    });
+
+    initObstacles();
+    tick();
+  </script>
+</body>
+</html>
