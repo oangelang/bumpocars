@@ -88,6 +88,7 @@
       width: 100%;
       height: 100%;
       display: block;
+      touch-action: none;
     }
 
     .hint {
@@ -102,7 +103,7 @@
   <div class="frame">
     <div class="hud">
       <h1>BUMPO CARS</h1>
-      <p>WASD / Arrow Keys to drive. Bump the walls and roaming bumpers.</p>
+      <p>WASD / Arrow Keys or drag on mobile. Bump the walls and roaming bumpers.</p>
       <div class="counter">Bumps: <span id="bump-count">0</span></div>
     </div>
     <div class="arena">
@@ -323,6 +324,50 @@
       drawArena();
       requestAnimationFrame(tick);
     }
+
+    function getPointerPosition(event) {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      return {
+        x: (event.clientX - rect.left) * scaleX,
+        y: (event.clientY - rect.top) * scaleY,
+      };
+    }
+
+    let dragging = false;
+    let lastPointer = null;
+
+    canvas.addEventListener('pointerdown', (event) => {
+      dragging = true;
+      lastPointer = getPointerPosition(event);
+      canvas.setPointerCapture(event.pointerId);
+    });
+
+    canvas.addEventListener('pointermove', (event) => {
+      if (!dragging) {
+        return;
+      }
+      const next = getPointerPosition(event);
+      if (lastPointer) {
+        state.car.vx = clamp((next.x - lastPointer.x) * 0.25, -maxSpeed, maxSpeed);
+        state.car.vy = clamp((next.y - lastPointer.y) * 0.25, -maxSpeed, maxSpeed);
+      }
+      state.car.x = next.x;
+      state.car.y = next.y;
+      lastPointer = next;
+    });
+
+    function stopDrag(event) {
+      dragging = false;
+      lastPointer = null;
+      if (event && event.pointerId) {
+        canvas.releasePointerCapture(event.pointerId);
+      }
+    }
+
+    canvas.addEventListener('pointerup', stopDrag);
+    canvas.addEventListener('pointercancel', stopDrag);
 
     function initObstacles() {
       const positions = [
